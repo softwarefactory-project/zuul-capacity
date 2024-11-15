@@ -81,8 +81,8 @@ def main():
     start_http_server(8080)
 
     while True:
-        update_providers_metric(metrics, providers)
         time.sleep(300)
+        update_providers_metric(metrics, providers)
 
 
 
