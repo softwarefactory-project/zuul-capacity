@@ -1,5 +1,8 @@
 # Copyright © 2024 Tristan de Cacqueray
 # SPDX-License-Identifier: Apache-2.0
+#
+# The purpose of this script is to collect resources usage of nodepool provider.
+# The metrics are available as a prometheus scrap target.
 
 import argparse, openstack, logging, time, yaml
 from dataclasses import dataclass
@@ -59,7 +62,8 @@ def update_providers_metric(metrics, providers):
 
 def usage():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nodepool", metavar="FILE", required=True)
+    parser.add_argument("--nodepool", metavar="FILE", default="/etc/nodepool/nodepool.yaml", help="The list of providers")
+    parser.add_argument("--port", type=int, default=8080, help="The prometheus scrap target listening port")
     return parser.parse_args()
 
 def main():
@@ -77,8 +81,8 @@ def main():
     update_providers_metric(metrics, providers)
 
     # Initialize connection
-    log.info("Starting exporter at :8080 for %d provider", len(providers))
-    start_http_server(8080)
+    log.info("Starting exporter at :%d for %d provider", args.port, len(providers))
+    start_http_server(args.port)
 
     while True:
         time.sleep(300)
