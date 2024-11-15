@@ -6,7 +6,7 @@
 
 import argparse, openstack, logging, time, yaml
 from dataclasses import dataclass
-from prometheus_client import start_http_server, Gauge
+from prometheus_client import start_http_server, Gauge, Counter
 
 log = logging.getLogger("zuul-capacity")
 
@@ -49,16 +49,24 @@ def get_providers(nodepool_yaml):
             providers[provider["name"]] = Provider.from_nodepool(provider)
     return providers
 
+def update_provider_metric(metrics, name, provider):
+    resources = get_resources(provider.cloud)
+    metrics["instances"].labels(cloud=name).set(len(resources))
+    cpu, mem = 0, 0
+    for resource in resources:
+        cpu += resource.cpu
+        mem += resource.mem
+    metrics["cpu"].labels(cloud=name).set(cpu)
+    metrics["mem"].labels(cloud=name).set(mem)
+
 def update_providers_metric(metrics, providers):
     for (name, provider) in providers.items():
-        resources = get_resources(provider.cloud)
-        metrics["instances"].labels(cloud=name).set(len(resources))
-        cpu, mem = 0, 0
-        for resource in resources:
-            cpu += resource.cpu
-            mem += resource.mem
-        metrics["cpu"].labels(cloud=name).set(cpu)
-        metrics["mem"].labels(cloud=name).set(mem)
+        try:
+            update_provider_metric(metrics, name, provider)
+        except Exception as e:
+            log.exception("Couldn't get provider", name, e)
+            metrics["error"].labels(cloud=name).inc()
+
 
 def usage():
     parser = argparse.ArgumentParser()
@@ -74,6 +82,7 @@ def main():
         instances = Gauge('zuul_instances_total', 'Instance count', ['cloud']),
         mem = Gauge('zuul_instances_mem', 'Memory usage', ['cloud']),
         cpu = Gauge('zuul_instances_cpu', 'VCPU usage', ['cloud']),
+        error = Counter("zuul_provider_error", 'API call error', ['cloud'])
     )
 
     providers = get_providers(args.nodepool)
