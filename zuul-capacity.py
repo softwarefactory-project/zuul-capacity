@@ -44,9 +44,9 @@ def get_providers(nodepool_yaml):
     "Get the cloud provider from the nodepool config."
     providers = dict()
     nodepool = yaml.safe_load(open(nodepool_yaml))
-    for provider in nodepool["providers"]:
-        if provider["driver"] == "openstack":
-            providers[provider["name"]] = Provider.from_nodepool(provider)
+    for provider in nodepool.get("providers", []):
+        if provider.get("driver") == "openstack" and provider.get("cloud"):
+            providers[provider.get("name", "unknown")] = Provider.from_nodepool(provider)
     return providers
 
 def update_provider_metric(metrics, name, provider):
