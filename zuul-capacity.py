@@ -29,7 +29,7 @@ def get_resources(cloud):
 @dataclass
 class Provider:
     max_server: int
-    cloud: openstack.Cloud
+    cloud: any
 
     def from_nodepool(provider):
         return Provider(
