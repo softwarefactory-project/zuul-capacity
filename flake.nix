@@ -17,7 +17,7 @@
 
         info = builtins.fromTOML (builtins.readFile ./pyproject.toml);
 
-        container-name = "ghcr.io/tristancacqueray/zuul-capacity";
+        container-name = "ghcr.io/softwarefactory-project/zuul-capacity";
         container = pkgs.dockerTools.streamLayeredImage {
           name = container-name;
           tag = "latest";
@@ -26,7 +26,7 @@
             [ "${python}/bin/python3" "${self}/zuul-capacity.py" ];
           config.Labels = {
             "org.opencontainers.image.source" =
-              "https://github.com/tristancacqueray/zuul-capacity";
+              "https://github.com/softwarefactory-project/zuul-capacity";
           };
         };
 
