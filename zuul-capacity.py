@@ -26,7 +26,7 @@ def get_resources(cloud):
         try:
             resources.append(Resource.from_server(server))
         except Exception as e:
-            log.exception("Couldn't get server resource", e, server)
+            log.exception("Couldn't get server resource %s: %s", server, e)
     return resources
 
 @dataclass
@@ -64,7 +64,7 @@ def update_providers_metric(metrics, providers):
         try:
             update_provider_metric(metrics, name, provider)
         except Exception as e:
-            log.exception("Couldn't get provider", name, e)
+            log.exception("Couldn't get provider %s: %s", name, e)
             metrics["error"].labels(cloud=name).inc()
 
 
