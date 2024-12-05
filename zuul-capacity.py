@@ -17,14 +17,27 @@ class Resource:
 
     def from_server(server):
         flavor = server["flavor"]
+        if flavor["ram"] == 0:
+            return None
         return Resource(flavor["ram"], flavor["vcpus"])
 
-def get_resources(cloud):
+    def from_flavor(flavors, cloud, server):
+        flavor_id = server["flavor"].id
+        if flavor_id not in flavors:
+            log.info("Requesting flavor %s", flavor_id)
+            flavors[flavor_id] = cloud.get_flavor(flavor_id)
+        flavor = flavors[flavor_id]
+        return Resource(flavor["ram"], flavor["vcpus"])
+
+def get_resources(flavors, cloud):
     "Get the cloud resources."
     resources = []
     for server in cloud.compute.servers():
         try:
-            resources.append(Resource.from_server(server))
+            if resource := Resource.from_server(server):
+                resources.append(resource)
+            else:
+                resources.append(Resource.from_flavor(flavors, cloud, server))
         except Exception as e:
             log.exception("Couldn't get server resource %s: %s", server, e)
     return resources
@@ -49,8 +62,8 @@ def get_providers(nodepool_yaml):
             providers[provider.get("name", "unknown")] = Provider.from_nodepool(provider)
     return providers
 
-def update_provider_metric(metrics, name, provider):
-    resources = get_resources(provider.cloud)
+def update_provider_metric(metrics, flavors, name, provider):
+    resources = get_resources(flavors, provider.cloud)
     metrics["instances"].labels(cloud=name).set(len(resources))
     cpu, mem = 0, 0
     for resource in resources:
@@ -59,10 +72,10 @@ def update_provider_metric(metrics, name, provider):
     metrics["cpu"].labels(cloud=name).set(cpu)
     metrics["mem"].labels(cloud=name).set(mem)
 
-def update_providers_metric(metrics, providers):
+def update_providers_metric(metrics, flavors, providers):
     for (name, provider) in providers.items():
         try:
-            update_provider_metric(metrics, name, provider)
+            update_provider_metric(metrics, flavors, name, provider)
         except Exception as e:
             log.exception("Couldn't get provider %s: %s", name, e)
             metrics["error"].labels(cloud=name).inc()
@@ -86,8 +99,9 @@ def main():
     )
 
     providers = get_providers(args.nodepool)
+    flavors = dict()
 
-    update_providers_metric(metrics, providers)
+    update_providers_metric(metrics, flavors, providers)
 
     # Initialize connection
     log.info("Starting exporter at :%d for %d provider", args.port, len(providers))
@@ -95,7 +109,7 @@ def main():
 
     while True:
         time.sleep(300)
-        update_providers_metric(metrics, providers)
+        update_providers_metric(metrics, flavors, providers)
 
 
 
