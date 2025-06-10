@@ -14,12 +14,13 @@ log = logging.getLogger("zuul-capacity")
 class Resource:
     mem: int
     cpu: int
+    disk: int
 
     def from_server(server):
         flavor = server["flavor"]
         if flavor["ram"] == 0:
             return None
-        return Resource(flavor["ram"], flavor["vcpus"])
+        return Resource(flavor["ram"], flavor["vcpus"], flavor["disk"])
 
     def from_flavor(flavors, cloud, server):
         flavor_id = server["flavor"].id
@@ -27,7 +28,7 @@ class Resource:
             log.info("Requesting flavor %s", flavor_id)
             flavors[flavor_id] = cloud.get_flavor(flavor_id)
         flavor = flavors[flavor_id]
-        return Resource(flavor["ram"], flavor["vcpus"])
+        return Resource(flavor["ram"], flavor["vcpus"], flavor["disk"])
 
 def get_resources(flavors, cloud):
     "Get the cloud resources."
@@ -69,8 +70,10 @@ def update_provider_metric(metrics, flavors, name, provider):
     for resource in resources:
         cpu += resource.cpu
         mem += resource.mem
+        disk += resource.disk
     metrics["cpu"].labels(cloud=name).set(cpu)
     metrics["mem"].labels(cloud=name).set(mem)
+    metrics["disk"].labels(cloud=name).set(disk)
 
 def update_providers_metric(metrics, flavors, providers):
     for (name, provider) in providers.items():
@@ -95,6 +98,7 @@ def main():
         instances = Gauge('zuul_instances_total', 'Instance count', ['cloud']),
         mem = Gauge('zuul_instances_mem', 'Memory usage', ['cloud']),
         cpu = Gauge('zuul_instances_cpu', 'VCPU usage', ['cloud']),
+        disk = Gauge('zuul_instances_disk', 'Disk usage', ['cloud']),
         error = Counter("zuul_provider_error", 'API call error', ['cloud'])
     )
 
