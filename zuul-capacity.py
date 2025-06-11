@@ -4,11 +4,16 @@
 # The purpose of this script is to collect resources usage of nodepool provider.
 # The metrics are available as a prometheus scrap target.
 
-import argparse, openstack, logging, time, yaml
+import argparse
+import openstack
+import logging
+import time
+import yaml
 from dataclasses import dataclass
 from prometheus_client import start_http_server, Gauge, Counter
 
 log = logging.getLogger("zuul-capacity")
+
 
 @dataclass
 class Resource:
@@ -30,6 +35,7 @@ class Resource:
         flavor = flavors[flavor_id]
         return Resource(flavor["ram"], flavor["vcpus"], flavor["disk"])
 
+
 def get_resources(flavors, cloud):
     "Get the cloud resources."
     resources = []
@@ -43,6 +49,7 @@ def get_resources(flavors, cloud):
             log.exception("Couldn't get server resource %s: %s", server, e)
     return resources
 
+
 @dataclass
 class Provider:
     max_server: int
@@ -50,9 +57,9 @@ class Provider:
 
     def from_nodepool(provider):
         return Provider(
-            provider.get("max-server", -1),
-            openstack.connect(cloud=provider["cloud"])
+            provider.get("max-server", -1), openstack.connect(cloud=provider["cloud"])
         )
+
 
 def get_providers(nodepool_yaml):
     "Get the cloud provider from the nodepool config."
@@ -60,13 +67,16 @@ def get_providers(nodepool_yaml):
     nodepool = yaml.safe_load(open(nodepool_yaml))
     for provider in nodepool.get("providers", []):
         if provider.get("driver") == "openstack" and provider.get("cloud"):
-            providers[provider.get("name", "unknown")] = Provider.from_nodepool(provider)
+            providers[provider.get("name", "unknown")] = Provider.from_nodepool(
+                provider
+            )
     return providers
+
 
 def update_provider_metric(metrics, flavors, name, provider):
     resources = get_resources(flavors, provider.cloud)
     metrics["instances"].labels(cloud=name).set(len(resources))
-    cpu, mem = 0, 0
+    cpu, mem, disk = 0, 0, 0
     for resource in resources:
         cpu += resource.cpu
         mem += resource.mem
@@ -75,8 +85,9 @@ def update_provider_metric(metrics, flavors, name, provider):
     metrics["mem"].labels(cloud=name).set(mem)
     metrics["disk"].labels(cloud=name).set(disk)
 
+
 def update_providers_metric(metrics, flavors, providers):
-    for (name, provider) in providers.items():
+    for name, provider in providers.items():
         try:
             update_provider_metric(metrics, flavors, name, provider)
         except Exception as e:
@@ -86,20 +97,31 @@ def update_providers_metric(metrics, flavors, providers):
 
 def usage():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nodepool", metavar="FILE", default="/etc/nodepool/nodepool.yaml", help="The list of providers")
-    parser.add_argument("--port", type=int, default=8080, help="The prometheus scrap target listening port")
+    parser.add_argument(
+        "--nodepool",
+        metavar="FILE",
+        default="/etc/nodepool/nodepool.yaml",
+        help="The list of providers",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="The prometheus scrap target listening port",
+    )
     return parser.parse_args()
+
 
 def main():
     args = usage()
     logging.basicConfig(level=logging.INFO)
 
     metrics = dict(
-        instances = Gauge('zuul_instances_total', 'Instance count', ['cloud']),
-        mem = Gauge('zuul_instances_mem', 'Memory usage', ['cloud']),
-        cpu = Gauge('zuul_instances_cpu', 'VCPU usage', ['cloud']),
-        disk = Gauge('zuul_instances_disk', 'Disk usage', ['cloud']),
-        error = Counter("zuul_provider_error", 'API call error', ['cloud'])
+        instances=Gauge("zuul_instances_total", "Instance count", ["cloud"]),
+        mem=Gauge("zuul_instances_mem", "Memory usage", ["cloud"]),
+        cpu=Gauge("zuul_instances_cpu", "VCPU usage", ["cloud"]),
+        disk=Gauge("zuul_instances_disk", "Disk usage", ["cloud"]),
+        error=Counter("zuul_provider_error", "API call error", ["cloud"]),
     )
 
     providers = get_providers(args.nodepool)
@@ -114,7 +136,6 @@ def main():
     while True:
         time.sleep(300)
         update_providers_metric(metrics, flavors, providers)
-
 
 
 if __name__ == "__main__":
