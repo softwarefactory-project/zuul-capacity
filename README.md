@@ -13,3 +13,13 @@ options:
 ```
 
 To run this service, you must provide a nodepool configuration and a clouds.yaml.
+
+## Changelog
+
+### 0.5.0
+
+- Added a zuul_instances_disk metric
+
+### 0.4.0
+
+- Initial release
