@@ -6,6 +6,7 @@
 
 import argparse
 import openstack
+import boto3
 import logging
 import time
 import yaml
@@ -35,6 +36,17 @@ class Resource:
         flavor = flavors[flavor_id]
         return Resource(flavor["ram"], flavor["vcpus"], flavor["disk"])
 
+    def from_aws_instance(instance_types, volume_sizes, instance):
+        instance_type = instance_types[instance["InstanceType"]]
+        mem = instance_type["MemoryInfo"]["SizeInMiB"]
+        cpu = instance_type["VCpuInfo"]["DefaultVCpus"]
+        disk = sum(
+            volume_sizes.get(bdm["Ebs"]["VolumeId"], 0)
+            for bdm in instance.get("BlockDeviceMappings", [])
+            if "Ebs" in bdm
+        )
+        return Resource(mem, cpu, disk)
+
 
 def get_resources(flavors, cloud):
     "Get the cloud resources."
@@ -50,15 +62,58 @@ def get_resources(flavors, cloud):
     return resources
 
 
+def get_aws_resources(instance_types, ec2):
+    "Get the resources of a Nodepool aws driver provider (e.g. backed by prekv)."
+    instances = []
+    for page in ec2.get_paginator("describe_instances").paginate():
+        for reservation in page["Reservations"]:
+            instances.extend(reservation["Instances"])
+
+    unknown_types = {i["InstanceType"] for i in instances} - instance_types.keys()
+    if unknown_types:
+        log.info("Requesting instance types %s", unknown_types)
+        described = ec2.describe_instance_types(InstanceTypes=list(unknown_types))
+        for it in described["InstanceTypes"]:
+            instance_types[it["InstanceType"]] = it
+
+    volume_ids = [
+        bdm["Ebs"]["VolumeId"]
+        for instance in instances
+        for bdm in instance.get("BlockDeviceMappings", [])
+        if "Ebs" in bdm
+    ]
+    volume_sizes = {}
+    if volume_ids:
+        paginator = ec2.get_paginator("describe_volumes")
+        for page in paginator.paginate(VolumeIds=volume_ids):
+            for volume in page["Volumes"]:
+                volume_sizes[volume["VolumeId"]] = volume["Size"]
+
+    resources = []
+    for instance in instances:
+        try:
+            resources.append(
+                Resource.from_aws_instance(instance_types, volume_sizes, instance)
+            )
+        except Exception as e:
+            log.exception("Couldn't get instance resource %s: %s", instance, e)
+    return resources
+
+
 @dataclass
 class Provider:
     max_server: int
+    driver: str
     cloud: any
 
     def from_nodepool(provider):
-        return Provider(
-            provider.get("max-server", -1), openstack.connect(cloud=provider["cloud"])
-        )
+        driver = provider.get("driver")
+        if driver == "aws":
+            session = boto3.Session(profile_name=provider["profile-name"])
+            cloud = session.client("ec2")
+        else:
+            cloud = openstack.connect(cloud=provider["cloud"])
+        return Provider(provider.get("max-server", -1), driver, cloud)
 
 
 def get_providers(nodepool_yaml):
@@ -66,15 +121,21 @@ def get_providers(nodepool_yaml):
     providers = dict()
     nodepool = yaml.safe_load(open(nodepool_yaml))
     for provider in nodepool.get("providers", []):
-        if provider.get("driver") == "openstack" and provider.get("cloud"):
+        driver = provider.get("driver")
+        if (driver == "openstack" and provider.get("cloud")) or (
+            driver == "aws" and provider.get("profile-name")
+        ):
             providers[provider.get("name", "unknown")] = Provider.from_nodepool(
                 provider
             )
     return providers
 
 
-def update_provider_metric(metrics, flavors, name, provider):
-    resources = get_resources(flavors, provider.cloud)
+def update_provider_metric(metrics, flavors, instance_types, name, provider):
+    if provider.driver == "aws":
+        resources = get_aws_resources(instance_types, provider.cloud)
+    else:
+        resources = get_resources(flavors, provider.cloud)
     metrics["instances"].labels(cloud=name).set(len(resources))
     cpu, mem, disk = 0, 0, 0
     for resource in resources:
@@ -86,10 +147,10 @@ def update_provider_metric(metrics, flavors, name, provider):
     metrics["disk"].labels(cloud=name).set(disk)
 
 
-def update_providers_metric(metrics, flavors, providers):
+def update_providers_metric(metrics, flavors, instance_types, providers):
     for name, provider in providers.items():
         try:
-            update_provider_metric(metrics, flavors, name, provider)
+            update_provider_metric(metrics, flavors, instance_types, name, provider)
         except Exception as e:
             log.exception("Couldn't get provider %s: %s", name, e)
             metrics["error"].labels(cloud=name).inc()
@@ -126,8 +187,9 @@ def main():
 
     providers = get_providers(args.nodepool)
     flavors = dict()
+    instance_types = dict()
 
-    update_providers_metric(metrics, flavors, providers)
+    update_providers_metric(metrics, flavors, instance_types, providers)
 
     # Initialize connection
     log.info("Starting exporter at :%d for %d provider", args.port, len(providers))
@@ -135,7 +197,7 @@ def main():
 
     while True:
         time.sleep(300)
-        update_providers_metric(metrics, flavors, providers)
+        update_providers_metric(metrics, flavors, instance_types, providers)
 
 
 if __name__ == "__main__":

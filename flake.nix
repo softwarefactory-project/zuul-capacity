@@ -13,7 +13,7 @@
       let
         pkgs = import nixpkgs { inherit system; };
         python = pkgs.python311.withPackages
-          (ps: [ ps.openstacksdk ps.prometheus-client ps.pyyaml ]);
+          (ps: [ ps.openstacksdk ps.boto3 ps.prometheus-client ps.pyyaml ]);
 
         info = builtins.fromTOML (builtins.readFile ./pyproject.toml);
 
